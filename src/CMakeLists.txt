@@ -1,10 +1,25 @@
 add_executable(pico_vision
-    main.cpp
+    arducam/arducam.c
+    main.c
+    lib/mnist.c
+    # Pico4ML Display
+    lib/fonts.c
+    lib/st7735.c
+    lib/DEV_Config.c
 )
 
+pico_generate_pio_header(pico_vision ${CMAKE_CURRENT_LIST_DIR}/image.pio)
+
 # Add dependencies
-target_link_libraries(pico_vision 
+target_link_libraries(pico_vision
     pico_stdlib
+	hardware_dma
+    hardware_pwm
+    hardware_pio
+    hardware_spi
+    hardware_i2c
+    pico_time
+	pico_multicore
 )
 
 # Route stdin/stdout to USB rather than UART
