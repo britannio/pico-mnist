@@ -1,5 +1,7 @@
 # Raspberry Pi Pico (ArduCAM Pico4ML) Realtime MNIST classifier.
 
+![Demo](https://raw.githubusercontent.com/britannio/pico-mnist/main/docs/demo1.png)
+
 
 ## Setup
 
