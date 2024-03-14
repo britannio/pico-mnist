@@ -11,7 +11,8 @@
 // Core 0
 uint8_t core_0_image_buf[324 * 324];
 uint8_t prediction_img_buf[28 * 28 * 2];
-int8_t mnist_prediction = -1;
+volatile uint8_t mnist_prediction;
+float prediction_input[28 * 28];
 
 
 // Core 1
@@ -23,8 +24,7 @@ uint8_t header[2] = {0x55, 0xAA};
 
 #define FLAG_VALUE 123
 
-#define FLAG_COPY_IMG 0
-#define FLAG_DISPLAY_RES 1
+#define DISPLAY_SIZE 324
 
 void create_arducam_config(struct arducam_config *config) {
     config->sccb = i2c0;
@@ -82,9 +82,14 @@ void core1_entry() {
 
         // Read from the 324x324 frame and fill imageFeedBuf with a 80x80 RBG copy of the image.
         uint16_t index = 0;
-        for (int y = 0; y < 80; y++) {
-            for (int x = 0; x < 80; x++) {
-                long i = (2 + 160 - 2 * y) * 324 + (2 + 40 + 2 * x);
+        const int HEIGHT = 80;
+        const int WIDTH = 80;
+        for (int y = 0; y < HEIGHT; y++) {
+            for (int x = 0; x < WIDTH; x++) {
+                int x_scale_factor = DISPLAY_SIZE / WIDTH;
+                int y_scale_factor = DISPLAY_SIZE / HEIGHT;
+                long i = (y_scale_factor + (HEIGHT * y_scale_factor) - y_scale_factor * y) * DISPLAY_SIZE +
+                         (x_scale_factor + (WIDTH * x_scale_factor) + x_scale_factor * x);
                 uint8_t c = core_1_image_buf[i];
                 uint16_t imageRGB = ST7735_COLOR565(c, c, c);
                 imageFeedBuf[index++] = (uint8_t) (imageRGB >> 8) & 0xFF;
@@ -95,13 +100,15 @@ void core1_entry() {
         // Display the image feed.
         ST7735_DrawImage(0, 0, 80, 80, imageFeedBuf);
 
-        // TODO Display the RGB image LTWH(6,26,28,28)
         // TODO Display the prediction (x>=40...)
         if (display_result) {
             // Display the prediction image
             ST7735_DrawImage(6, 80 + 26, 28, 28, prediction_img_buf);
             // Display the current prediction
-            ST7735_FillRectangle(80 - 6 - 28, 80 + 26, 28, 28, 0XC0);
+            char str[2];
+            sprintf(str, "%d", mnist_prediction);
+            ST7735_WriteString(40 + 12, 80 + 27, str, Font_16x26, ST7735_WHITE, 0x00);
+//            ST7735_FillRectangle(80 - 6 - 28, 80 + 26, 28, 28, 0XC0);
         }
     }
 }
@@ -113,47 +120,40 @@ void core0_entry() {
         // This is not time sensitive unlike the realtime updates to the camera feed on core 1.
         multicore_fifo_push_blocking(0);
 
-
-
-        // TODO Resize to 28x28 RGB to be displayed
-//        prediction_img_buf
         int index = 0;
-
-        for (int y = 0; y < 28; y++) {
-            for (int x = 0; x < 28; x++) {
-
-//                long i = (2 + 56 - 2 * y) * 324 + (2 + 14 + 2 * x);
-                int x_scale_factor = 11;
-                int y_scale_factor = 11;
-                long i = (y_scale_factor + (28 * y_scale_factor) - y_scale_factor * y) * 324 + (x_scale_factor + (28 * x_scale_factor) + x_scale_factor * x);
+        const int HEIGHT = 28;
+        const int WIDTH = 28;
+        for (int y = 0; y < HEIGHT; y++) {
+            for (int x = 0; x < WIDTH; x++) {
+                int x_scale_factor = DISPLAY_SIZE / WIDTH;
+                int y_scale_factor = DISPLAY_SIZE / HEIGHT;
+                long i = (y_scale_factor + (HEIGHT * y_scale_factor) - y_scale_factor * y) * DISPLAY_SIZE +
+                         (x_scale_factor + (WIDTH * x_scale_factor) + x_scale_factor * x);
                 uint8_t c = core_0_image_buf[i];
                 uint16_t imageRGB = ST7735_COLOR565(c, c, c);
                 prediction_img_buf[index++] = (uint8_t) (imageRGB >> 8) & 0xFF;
                 prediction_img_buf[index++] = (uint8_t) (imageRGB) & 0xFF;
+
+                prediction_input[y * HEIGHT + x] = (float) c / 255.0f;
             }
         }
-//        for (int y = 0; y < 28; y++) {
-//            for (int x = 0; x < 28; x++) {
-////                Reference
-////                long i = (2 + 160 - 2 * y) * 324 + (2 + 40 + 2 * x);
-//
-////                long i = (2 + (56 * 2) - 2 * y) * 324 + (2 + 28 + 2 * x);
-////                long i = (2 + 160 - 2 * y) * 324 + (2 + 40 + 2 * x);
-//
-//                int x_scaled = x * 11;
-//                int y_scaled = y * 11;
-//                long i = (324 * y_scaled) + x_scaled;
-//                uint8_t c = core_0_image_buf[i];
-//                uint16_t imageRGB = ST7735_COLOR565(c, c, c);
-//                prediction_img_buf[index++] = (uint8_t) (imageRGB >> 8) & 0xFF;
-//                prediction_img_buf[index++] = (uint8_t) (imageRGB) & 0xFF;
-//            }
-//        }
 
+        float input0[3136]; // 4 * 28 * 28
+        float output0[40]; // 4 * 10 (the number of outputs of the neural network)
+        memcpy(input0, prediction_input, sizeof(prediction_input));
+        net(input0, output0);
 
-        // TODO Resize to [28*28] 'tensor' to feed into `net()`
-        // TODO Feed tensor into `net()` to get the prediction
-        // TODO Print the prediction
+        float maxLogit = -1;
+        for (int i = 0; i < 10; ++i) {
+            float logit = output0[i];
+            printf("%f\t", logit);
+            if (logit > maxLogit) {
+                mnist_prediction = i + 1;
+                maxLogit = logit;
+            }
+        }
+        printf("\n");
+        printf("Predicted digit %d\n", mnist_prediction);
     }
 }
 
