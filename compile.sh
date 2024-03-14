@@ -1,5 +1,6 @@
 #!/bin/bash
 
+rm -rf build/
 mkdir -p build/
 # Enter the build directory (or quit if we fail to do so)
 cd build || exit
