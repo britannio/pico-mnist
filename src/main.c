@@ -148,7 +148,7 @@ void core0_entry() {
             float logit = output0[i];
             printf("%f\t", logit);
             if (logit > maxLogit) {
-                mnist_prediction = i + 1;
+                mnist_prediction = i;
                 maxLogit = logit;
             }
         }

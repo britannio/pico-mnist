@@ -1,8 +1,6 @@
 #!/bin/bash
 
-# Remove and remake the build directory
-rm -rf build/
-mkdir build/
+mkdir -p build/
 # Enter the build directory (or quit if we fail to do so)
 cd build || exit
 # Compile the project
